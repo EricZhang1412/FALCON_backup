@@ -133,6 +133,7 @@ def _generate_lti_schedules(
     x_pos: np.ndarray,
     x_neg_abs: np.ndarray,
     init: ModelInitSpec,
+    fold_abs_input_for_polarities: bool = False,
 ) -> dict[str, Any]:
     """
     Generate threshold schedules from LTI parameters.
@@ -147,46 +148,67 @@ def _generate_lti_schedules(
     Reset and output schedules inherit from the YAML init spec ranges
     and are spread linearly across bases to preserve schedule diversity.
     """
-    # --- Positive half ---
-    log_gamma = np.linspace(np.log(gamma_min), np.log(gamma_max), num_pos)
-    gamma_pos = np.exp(log_gamma)
-    lambda_v_pos = np.exp(-gamma_pos)
-
-    q_ranks_pos = np.array([(k + 1) / (num_pos + 1) for k in range(num_pos)])
-    if len(x_pos) > 0:
-        # For one-sided positive inputs, linear quantiles under-cover the near-zero
-        # high-curvature region (e.g., rsqrt). Use log-space anchors instead.
-        if len(x_neg_abs) == 0:
-            x_floor = max(float(np.min(x_pos)), 1e-8)
-            x_ceil = float(np.max(x_pos))
-            alpha_v_pos = np.exp(np.linspace(np.log(x_floor), np.log(x_ceil), num_pos))
+    if fold_abs_input_for_polarities:
+        num_total = num_pos + num_neg
+        x_abs = x_pos if len(x_pos) > 0 else x_neg_abs
+        if len(x_abs) > 0:
+            x_floor = max(float(np.min(x_abs)), 1e-8)
+            x_ceil = float(np.max(x_abs))
+            alpha_v_all = np.exp(np.linspace(np.log(x_floor), np.log(x_ceil), num_total))
         else:
-            alpha_v_pos = np.quantile(x_pos, q_ranks_pos)
+            alpha_v_all = np.linspace(0.1, 1.0, num_total)
+
+        log_gamma_all = np.linspace(np.log(gamma_min), np.log(gamma_max), num_total)
+        gamma_all = np.exp(log_gamma_all)
+        lambda_v_all = np.exp(-gamma_all)
+        lambda_v_all = np.clip(lambda_v_all, 1e-6, 1.0 - 1e-6)
+        alpha_v_all = np.clip(alpha_v_all, 1e-6, None)
+
+        alpha_v_pos = alpha_v_all[:num_pos]
+        alpha_v_neg = alpha_v_all[num_pos:]
+        lambda_v_pos = lambda_v_all[:num_pos]
+        lambda_v_neg = lambda_v_all[num_pos:]
     else:
-        alpha_v_pos = np.linspace(0.1, 1.0, num_pos)
+        # --- Positive half ---
+        log_gamma = np.linspace(np.log(gamma_min), np.log(gamma_max), num_pos)
+        gamma_pos = np.exp(log_gamma)
+        lambda_v_pos = np.exp(-gamma_pos)
 
-    # Clamp: lambda_v must be in (0, 1)
-    lambda_v_pos = np.clip(lambda_v_pos, 1e-6, 1.0 - 1e-6)
-    alpha_v_pos = np.clip(alpha_v_pos, 1e-6, None)
-
-    # --- Negative half ---
-    log_gamma_neg = np.linspace(np.log(gamma_min), np.log(gamma_max), num_neg)
-    gamma_neg = np.exp(log_gamma_neg)
-    lambda_v_neg = np.exp(-gamma_neg)
-
-    q_ranks_neg = np.array([(k + 1) / (num_neg + 1) for k in range(num_neg)])
-    if len(x_neg_abs) > 0:
-        if len(x_pos) == 0:
-            x_floor = max(float(np.min(x_neg_abs)), 1e-8)
-            x_ceil = float(np.max(x_neg_abs))
-            alpha_v_neg = np.exp(np.linspace(np.log(x_floor), np.log(x_ceil), num_neg))
+        q_ranks_pos = np.array([(k + 1) / (num_pos + 1) for k in range(num_pos)])
+        if len(x_pos) > 0:
+            # For one-sided positive inputs, linear quantiles under-cover the near-zero
+            # high-curvature region (e.g., rsqrt). Use log-space anchors instead.
+            if len(x_neg_abs) == 0:
+                x_floor = max(float(np.min(x_pos)), 1e-8)
+                x_ceil = float(np.max(x_pos))
+                alpha_v_pos = np.exp(np.linspace(np.log(x_floor), np.log(x_ceil), num_pos))
+            else:
+                alpha_v_pos = np.quantile(x_pos, q_ranks_pos)
         else:
-            alpha_v_neg = np.quantile(x_neg_abs, q_ranks_neg)
-    else:
-        alpha_v_neg = np.linspace(0.1, 1.0, num_neg)
+            alpha_v_pos = np.linspace(0.1, 1.0, num_pos)
 
-    lambda_v_neg = np.clip(lambda_v_neg, 1e-6, 1.0 - 1e-6)
-    alpha_v_neg = np.clip(alpha_v_neg, 1e-6, None)
+        # Clamp: lambda_v must be in (0, 1)
+        lambda_v_pos = np.clip(lambda_v_pos, 1e-6, 1.0 - 1e-6)
+        alpha_v_pos = np.clip(alpha_v_pos, 1e-6, None)
+
+        # --- Negative half ---
+        log_gamma_neg = np.linspace(np.log(gamma_min), np.log(gamma_max), num_neg)
+        gamma_neg = np.exp(log_gamma_neg)
+        lambda_v_neg = np.exp(-gamma_neg)
+
+        q_ranks_neg = np.array([(k + 1) / (num_neg + 1) for k in range(num_neg)])
+        if len(x_neg_abs) > 0:
+            if len(x_pos) == 0:
+                x_floor = max(float(np.min(x_neg_abs)), 1e-8)
+                x_ceil = float(np.max(x_neg_abs))
+                alpha_v_neg = np.exp(np.linspace(np.log(x_floor), np.log(x_ceil), num_neg))
+            else:
+                alpha_v_neg = np.quantile(x_neg_abs, q_ranks_neg)
+        else:
+            alpha_v_neg = np.linspace(0.1, 1.0, num_neg)
+
+        lambda_v_neg = np.clip(lambda_v_neg, 1e-6, 1.0 - 1e-6)
+        alpha_v_neg = np.clip(alpha_v_neg, 1e-6, None)
 
     # --- Inherit reset/output from init spec ranges (basis-wise diverse) ---
     alpha_r_pos = np.linspace(init.positive.reset.alpha.min, init.positive.reset.alpha.max, num_pos)
@@ -280,7 +302,16 @@ def run_lti_search(
         g_max = np.exp(log_gmax)
 
         # Generate schedules
-        schedules = _generate_lti_schedules(g_min, g_max, num_pos, num_neg, x_pos, x_neg_abs, init)
+        schedules = _generate_lti_schedules(
+            g_min,
+            g_max,
+            num_pos,
+            num_neg,
+            x_pos,
+            x_neg_abs,
+            init,
+            fold_abs_input_for_polarities=fold_abs,
+        )
 
         # Simulate forward pass on subsampled grid
         O, spike_counts, dead_mask = _simulate_basis_outputs(
