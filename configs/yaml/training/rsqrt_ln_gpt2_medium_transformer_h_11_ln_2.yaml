@@ -1,0 +1,88 @@
+name: rsqrt_ln_gpt2_medium_transformer_h_11_ln_2
+target:
+  name: rsqrt
+  domain:
+    x_min: 10.656360626220703
+    x_max: 20000.0
+data:
+  num_samples: 8192
+  eval_num_samples: 8192
+  sampling: logspace
+  batch_size: 256
+  shuffle: true
+model:
+  T: 16
+  num_basis: 16
+  init:
+    positive:
+      threshold:
+        alpha:
+          min: 10.656360626220703
+          max: 20000.0
+        lambda:
+          min: 0.9
+          max: 0.995
+      reset:
+        alpha:
+          min: 0.5328180313110352
+          max: 2000.0
+        lambda:
+          min: 0.85
+          max: 0.98
+      output:
+        alpha:
+          min: 0.0003535533905932738
+          max: 0.15316712117510256
+        lambda:
+          min: 0.85
+          max: 0.995
+    negative:
+      threshold:
+        alpha:
+          min: 10.656360626220703
+          max: 20000.0
+        lambda:
+          min: 0.9
+          max: 0.995
+      reset:
+        alpha:
+          min: 0.5328180313110352
+          max: 2000.0
+        lambda:
+          min: 0.85
+          max: 0.98
+      output:
+        alpha:
+          min: 0.0003535533905932738
+          max: 0.15316712117510256
+        lambda:
+          min: 0.85
+          max: 0.995
+  fold_abs_input_for_polarities: true
+optimizer:
+  name: adam
+  lr: 0.0005
+  weight_decay: 0.0
+scheduler:
+  name: exponential
+  gamma: 0.99
+  step_every: 10
+trainer:
+  max_epochs: 60
+  seed: 42
+  device: cpu
+  dtype: float32
+  log_every: 5
+checkpoint:
+  dir: checkpoints
+  save_best: true
+  save_latest: true
+  resume_from: null
+artifacts:
+  root_dir: outputs/conversion
+  save_plots: true
+  save_predictions: true
+export:
+  export_runtime_config: true
+  export_model_name: rsqrt_ln_gpt2_medium_transformer_h_11_ln_2_export
+  export_to_yaml: true

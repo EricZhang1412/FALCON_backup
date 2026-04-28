@@ -41,5 +41,5 @@ outputs/
 *.svg
 *.pdf
 
-# Generated per-LN rsqrt training configs
-configs/yaml/training/rsqrt_ln_*.yaml
+# # Generated per-LN rsqrt training configs
+# configs/yaml/training/rsqrt_ln_*.yaml
