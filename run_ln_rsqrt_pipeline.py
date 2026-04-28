@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+DEFAULT_CONVERSION_CONFIG = "gelu_conversion"
+
 
 def _run(cmd: list[str], cwd: Path) -> None:
     print("\n>>>", " ".join(cmd))
@@ -28,8 +30,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--dtype", type=str, default="float32", choices=["float32", "bfloat16", "float16"])
 
-    p.add_argument("--conversion-config", type=str, default="gelu_conversion")
-    p.add_argument("--comparison-root", type=str, default="outputs/comparison/gelu_conversion")
+    p.add_argument(
+        "--comparison-root",
+        type=str,
+        default=f"outputs/comparison/{DEFAULT_CONVERSION_CONFIG}",
+    )
 
     p.add_argument("--manifest-out", type=str, default="outputs/ln_rsqrt_bank/gpt2_manifest.json")
     p.add_argument("--config-prefix", type=str, default="rsqrt_ln")
@@ -53,6 +58,7 @@ def main() -> int:
     args = _parse_args()
     root = Path(__file__).resolve().parent
     py = sys.executable
+    conversion_config = DEFAULT_CONVERSION_CONFIG
 
     # default: if neither flag is set, train both
     train_manual = args.train_manual or (not args.train_manual and not args.train_lti)
@@ -113,7 +119,7 @@ def main() -> int:
             "--hf-model",
             args.hf_model,
             "--conversion-config",
-            args.conversion_config,
+            conversion_config,
             "--comparison-root",
             args.comparison_root,
             "--rsqrt-bank-manifest",

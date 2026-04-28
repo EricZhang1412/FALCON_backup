@@ -1,5 +1,6 @@
 
 ## File Structure
+```
 falcon/
 ├── models/              # MBE 神经元定义（serial + decoder）
 │   ├── interfaces.py    # BasisSchedule, MBENeuronConfig
@@ -15,3 +16,4 @@ falcon/
 ├── configs/yaml/        # YAML 配置文件
 ├── run_comparison.py    # ⭐ 对比实验脚本
 └── run_conversion_training.py  # 单次训练脚本
+```
