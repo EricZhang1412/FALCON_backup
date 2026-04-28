@@ -106,7 +106,9 @@ uv run python -m scripts.layernorm_conversion.build_rsqrt_bank \
   --domain-pad-hi 2.0 \
   --model-T 32 \
   --num-basis 16 \
-  --max-epochs 200
+  --max-epochs 200 \
+  --init-mode domain_scaled \
+  --fold-abs-input-for-polarities
 ```
 
 Train the generated bank:

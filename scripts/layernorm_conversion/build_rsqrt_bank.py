@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 
@@ -39,6 +40,35 @@ def _build_domain(
             "Increase --max-ceil or reduce --min-domain-ratio."
         )
     return float(x_min), float(x_max)
+
+
+def _domain_scaled_schedule(x_min: float, x_max: float) -> dict:
+    y_min = 1.0 / math.sqrt(x_max)
+    y_max = 1.0 / math.sqrt(x_min)
+    reset_min = max(x_min * 0.05, 1e-8)
+    reset_max = max(x_max * 0.10, reset_min * 2.0)
+    output_min = max(y_min * 0.05, 1e-6)
+    output_max = max(y_max * 0.50, output_min * 2.0)
+    return {
+        "threshold": {
+            "alpha": {"min": float(max(x_min, 1e-8)), "max": float(x_max)},
+            "lambda": {"min": 0.90, "max": 0.995},
+        },
+        "reset": {
+            "alpha": {"min": float(reset_min), "max": float(reset_max)},
+            "lambda": {"min": 0.85, "max": 0.98},
+        },
+        "output": {
+            "alpha": {"min": float(output_min), "max": float(output_max)},
+            "lambda": {"min": 0.85, "max": 0.995},
+        },
+    }
+
+
+def _apply_domain_scaled_rsqrt_init(cfg: dict, *, x_min: float, x_max: float) -> None:
+    schedule = _domain_scaled_schedule(x_min, x_max)
+    cfg["model"]["init"]["positive"] = json.loads(json.dumps(schedule))
+    cfg["model"]["init"]["negative"] = json.loads(json.dumps(schedule))
 
 
 def _parse_args() -> argparse.Namespace:
@@ -73,6 +103,19 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--model-T", type=int, default=0, help="Override generated model.T when > 0.")
     p.add_argument("--num-basis", type=int, default=0, help="Override generated model.num_basis when > 0.")
     p.add_argument("--max-epochs", type=int, default=0, help="Override generated trainer.max_epochs when > 0.")
+    p.add_argument(
+        "--init-mode",
+        type=str,
+        default="domain_scaled",
+        choices=["domain_scaled", "template"],
+        help="How to initialize generated rsqrt MBE schedule ranges.",
+    )
+    p.add_argument(
+        "--fold-abs-input-for-polarities",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use abs(input) for both polarities so all bases are active for positive rsqrt inputs.",
+    )
     p.add_argument("--manifest-out", type=str, default="outputs/ln_rsqrt_bank/manifest.json")
     return p.parse_args()
 
@@ -161,12 +204,15 @@ def main() -> int:
         cfg["target"]["domain"]["x_min"] = float(x_min)
         cfg["target"]["domain"]["x_max"] = float(x_max)
         cfg["data"]["sampling"] = args.sampling
+        cfg["model"]["fold_abs_input_for_polarities"] = bool(args.fold_abs_input_for_polarities)
         if args.model_T > 0:
             cfg["model"]["T"] = int(args.model_T)
         if args.num_basis > 0:
             cfg["model"]["num_basis"] = int(args.num_basis)
         if args.max_epochs > 0:
             cfg["trainer"]["max_epochs"] = int(args.max_epochs)
+        if args.init_mode == "domain_scaled":
+            _apply_domain_scaled_rsqrt_init(cfg, x_min=x_min, x_max=x_max)
         cfg["export"]["export_model_name"] = f"{cfg_name}_export"
 
         cfg_path = training_dir / f"{cfg_name}.yaml"
@@ -180,6 +226,8 @@ def main() -> int:
                 "x_max": x_max,
                 "domain_ratio": x_max / x_min,
                 "sampling": args.sampling,
+                "init_mode": args.init_mode,
+                "fold_abs_input_for_polarities": bool(args.fold_abs_input_for_polarities),
                 "q_lo": q_lo,
                 "q_hi": q_hi,
             }
