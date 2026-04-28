@@ -24,8 +24,23 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run full per-LN rsqrt fitting + evaluation pipeline.")
     p.add_argument("--hf-model", type=str, default="gpt2")
     p.add_argument("--text-file", type=str, default="data/eval_texts_wikitext.txt")
+    p.add_argument(
+        "--wikitext-subset",
+        type=str,
+        default=None,
+        choices=["wikitext-2-raw-v1", "wikitext-103-raw-v1"],
+        help="Use official WikiText split for eval (validate stage).",
+    )
+    p.add_argument(
+        "--wikitext-split",
+        type=str,
+        default="test",
+        choices=["train", "validation", "test"],
+        help="Split for --wikitext-subset.",
+    )
     p.add_argument("--max-samples", type=int, default=500)
     p.add_argument("--max-length", type=int, default=128)
+    p.add_argument("--stride", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--dtype", type=str, default="float32", choices=["float32", "bfloat16", "float16"])
@@ -124,14 +139,12 @@ def main() -> int:
             args.comparison_root,
             "--rsqrt-bank-manifest",
             str(manifest_path),
-            "--text-file",
-            args.text_file,
-            "--max-samples",
-            str(args.max_samples),
             "--batch-size",
             str(args.batch_size),
             "--max-length",
             str(args.max_length),
+            "--stride",
+            str(args.stride),
             "--device",
             args.device,
             "--dtype",
@@ -139,6 +152,12 @@ def main() -> int:
             "--save-json",
             args.save_json,
         ]
+        if args.wikitext_subset:
+            cmd.extend(["--wikitext-subset", args.wikitext_subset, "--wikitext-split", args.wikitext_split])
+            if args.max_samples > 0:
+                cmd.extend(["--max-samples", str(args.max_samples)])
+        else:
+            cmd.extend(["--text-file", args.text_file, "--max-samples", str(args.max_samples)])
         _run(cmd, root)
 
     print("\nPipeline finished.")

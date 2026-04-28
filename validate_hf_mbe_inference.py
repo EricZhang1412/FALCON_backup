@@ -90,8 +90,22 @@ def _parse_args() -> argparse.Namespace:
         default="outputs/conversion_lti",
         help="Root directory of per-LN lti checkpoints.",
     )
-    parser.add_argument("--text-file", type=str, required=True, help="newline-separated evaluation texts")
-    parser.add_argument("--max-samples", type=int, default=64, help="maximum number of text samples")
+    parser.add_argument("--text-file", type=str, default=None, help="newline-separated evaluation texts")
+    parser.add_argument(
+        "--wikitext-subset",
+        type=str,
+        default=None,
+        choices=["wikitext-2-raw-v1", "wikitext-103-raw-v1"],
+        help="official WikiText subset to evaluate on (overrides --text-file)",
+    )
+    parser.add_argument(
+        "--wikitext-split",
+        type=str,
+        default="test",
+        choices=["train", "validation", "test"],
+        help="split for --wikitext-subset",
+    )
+    parser.add_argument("--max-samples", type=int, default=0, help="maximum number of text samples (0 means all)")
     parser.add_argument("--batch-size", type=int, default=4, help="batch size")
     parser.add_argument("--max-length", type=int, default=128, help="max token length")
     parser.add_argument(
@@ -159,7 +173,26 @@ def _load_eval_texts(path: Path, max_samples: int) -> list[str]:
     lines = [ln for ln in lines if ln]
     if not lines:
         raise ValueError(f"no valid lines in text file: {path}")
-    return lines[:max_samples]
+    if max_samples > 0:
+        return lines[:max_samples]
+    return lines
+
+
+def _load_wikitext_texts(subset: str, split: str, max_samples: int) -> list[str]:
+    try:
+        from datasets import load_dataset
+    except Exception as exc:
+        raise RuntimeError(
+            "datasets is required for --wikitext-subset. Install with `pip install datasets`."
+        ) from exc
+
+    ds = load_dataset("wikitext", subset, split=split)
+    texts = [str(item.get("text", "")) for item in ds]
+    if max_samples > 0:
+        texts = texts[:max_samples]
+    if not texts:
+        raise ValueError(f"empty WikiText split: subset={subset}, split={split}")
+    return texts
 
 
 def _build_concatenated_corpus(texts: list[str]) -> str:
@@ -389,7 +422,14 @@ def main() -> int:
         args.manual_checkpoint,
         args.lti_checkpoint,
     )
-    texts = _load_eval_texts(Path(args.text_file), args.max_samples)
+    if args.wikitext_subset:
+        texts = _load_wikitext_texts(args.wikitext_subset, args.wikitext_split, args.max_samples)
+        eval_source = f"wikitext/{args.wikitext_subset}:{args.wikitext_split}"
+    else:
+        if not args.text_file:
+            raise ValueError("Either --text-file or --wikitext-subset must be provided.")
+        texts = _load_eval_texts(Path(args.text_file), args.max_samples)
+        eval_source = str(Path(args.text_file))
     if args.stride <= 0:
         raise ValueError("--stride must be > 0")
     if args.max_length <= 1:
@@ -516,6 +556,9 @@ def main() -> int:
             "hf_model": args.hf_model,
             "conversion_config": args.conversion_config,
             "target_activation": target_act,
+            "eval_source": eval_source,
+            "wikitext_subset": args.wikitext_subset,
+            "wikitext_split": args.wikitext_split if args.wikitext_subset else None,
             "num_texts": len(texts),
             "corpus_char_count": len(corpus_text),
             "batch_size": args.batch_size,
