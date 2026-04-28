@@ -93,7 +93,7 @@ uv run python -m scripts.layernorm_conversion.build_rsqrt_bank \
   --manifest-out outputs/ln_rsqrt_bank/gpt2_manifest.json
 ```
 
-For LayerNorms whose `var + eps` distribution is very narrow or close to zero, use log-space sampling, a wider fitting domain, and a larger MBE budget:
+For GPT-2 medium, the first two LayerNorm modules are very sensitive. A practical default is to keep them exact and train a per-LN rsqrt bank for the remaining modules with `T=16` and 80 epochs:
 
 ```bash
 uv run python -m scripts.layernorm_conversion.build_rsqrt_bank \
@@ -104,9 +104,10 @@ uv run python -m scripts.layernorm_conversion.build_rsqrt_bank \
   --min-domain-ratio 64 \
   --domain-pad-lo 0.5 \
   --domain-pad-hi 2.0 \
-  --model-T 32 \
+  --skip-first-layernorms 2 \
+  --model-T 16 \
   --num-basis 16 \
-  --max-epochs 200 \
+  --max-epochs 80 \
   --init-mode domain_scaled \
   --fold-abs-input-for-polarities
 ```

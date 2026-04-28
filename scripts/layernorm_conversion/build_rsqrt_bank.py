@@ -13,8 +13,6 @@ import math
 import re
 from pathlib import Path
 
-import torch
-import yaml
 
 
 def _safe_name(s: str) -> str:
@@ -100,9 +98,15 @@ def _parse_args() -> argparse.Namespace:
         choices=["linspace", "logspace"],
         help="Input sampling mode written into generated rsqrt configs.",
     )
-    p.add_argument("--model-T", type=int, default=0, help="Override generated model.T when > 0.")
+    p.add_argument("--model-T", type=int, default=16, help="Generated model.T; set 0 to keep template value.")
     p.add_argument("--num-basis", type=int, default=0, help="Override generated model.num_basis when > 0.")
-    p.add_argument("--max-epochs", type=int, default=0, help="Override generated trainer.max_epochs when > 0.")
+    p.add_argument("--max-epochs", type=int, default=80, help="Generated trainer.max_epochs; set 0 to keep template value.")
+    p.add_argument(
+        "--skip-first-layernorms",
+        type=int,
+        default=2,
+        help="Skip the first N LayerNorm modules. Skipped modules stay exact during validation.",
+    )
     p.add_argument(
         "--init-mode",
         type=str,
@@ -124,8 +128,10 @@ def main() -> int:
     args = _parse_args()
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torch
+        import yaml
     except Exception as exc:
-        raise RuntimeError("transformers is required. Install with `pip install transformers`.") from exc
+        raise RuntimeError("transformers, torch, and PyYAML are required. Install project dependencies with `uv sync`.") from exc
 
     template_path = Path(args.base_template)
     template = yaml.safe_load(template_path.read_text(encoding="utf-8"))
@@ -182,8 +188,9 @@ def main() -> int:
     for h in hooks:
         h.remove()
 
+    skipped_entries = []
     entries = []
-    for ln_name, _ in ln_modules:
+    for ln_index, (ln_name, _) in enumerate(ln_modules):
         vals = torch.cat(per_ln_vals[ln_name])
         q_lo = float(torch.quantile(vals, torch.tensor(args.min_quantile)))
         q_hi = float(torch.quantile(vals, torch.tensor(args.max_quantile)))
@@ -198,6 +205,22 @@ def main() -> int:
         )
 
         cfg_name = f"{args.config_prefix}_{_safe_name(args.hf_model)}_{_safe_name(ln_name)}"
+        entry = {
+            "ln_name": ln_name,
+            "config_name": cfg_name,
+            "x_min": x_min,
+            "x_max": x_max,
+            "domain_ratio": x_max / x_min,
+            "sampling": args.sampling,
+            "init_mode": args.init_mode,
+            "fold_abs_input_for_polarities": bool(args.fold_abs_input_for_polarities),
+            "q_lo": q_lo,
+            "q_hi": q_hi,
+        }
+        if ln_index < args.skip_first_layernorms:
+            skipped_entries.append({**entry, "skip_reason": f"first_{args.skip_first_layernorms}_layernorms"})
+            continue
+
         cfg = json.loads(json.dumps(template))  # deep copy via json
         cfg["name"] = cfg_name
         cfg["target"]["name"] = "rsqrt"
@@ -218,29 +241,22 @@ def main() -> int:
         cfg_path = training_dir / f"{cfg_name}.yaml"
         cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=False), encoding="utf-8")
 
-        entries.append(
-            {
-                "ln_name": ln_name,
-                "config_name": cfg_name,
-                "x_min": x_min,
-                "x_max": x_max,
-                "domain_ratio": x_max / x_min,
-                "sampling": args.sampling,
-                "init_mode": args.init_mode,
-                "fold_abs_input_for_polarities": bool(args.fold_abs_input_for_polarities),
-                "q_lo": q_lo,
-                "q_hi": q_hi,
-            }
-        )
+        entries.append(entry)
 
     manifest = {
         "hf_model": args.hf_model,
         "text_file": str(Path(args.text_file)),
         "base_template": str(template_path),
+        "skip_first_layernorms": int(args.skip_first_layernorms),
+        "skipped_entries": skipped_entries,
         "entries": entries,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Generated {len(entries)} configs.")
+    if skipped_entries:
+        print(f"Skipped {len(skipped_entries)} LayerNorms:")
+        for item in skipped_entries:
+            print(f"  - {item['ln_name']}")
     print(f"Manifest: {manifest_path}")
     return 0
 

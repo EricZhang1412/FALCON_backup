@@ -68,7 +68,7 @@ scheduler:
   gamma: 0.99
   step_every: 10
 trainer:
-  max_epochs: 60
+  max_epochs: 80
   seed: 42
   device: cpu
   dtype: float32
