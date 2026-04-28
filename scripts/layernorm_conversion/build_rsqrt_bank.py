@@ -20,6 +20,27 @@ def _safe_name(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]+", "_", s).strip("_").lower()
 
 
+def _build_domain(
+    *,
+    q_lo: float,
+    q_hi: float,
+    min_floor: float,
+    max_ceil: float,
+    pad_lo: float,
+    pad_hi: float,
+    min_ratio: float,
+) -> tuple[float, float]:
+    x_min = max(min_floor, q_lo * pad_lo)
+    x_max = max(q_hi * pad_hi, x_min * min_ratio)
+    x_max = min(max_ceil, x_max)
+    if x_max <= x_min:
+        raise ValueError(
+            f"Invalid rsqrt fitting domain after clipping: x_min={x_min}, x_max={x_max}. "
+            "Increase --max-ceil or reduce --min-domain-ratio."
+        )
+    return float(x_min), float(x_max)
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build per-LN rsqrt conversion config bank.")
     p.add_argument("--hf-model", type=str, required=True)
@@ -34,6 +55,24 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--max-quantile", type=float, default=0.999)
     p.add_argument("--min-floor", type=float, default=1e-6)
     p.add_argument("--max-ceil", type=float, default=20000.0)
+    p.add_argument("--domain-pad-lo", type=float, default=0.8, help="Multiplier applied to low quantile.")
+    p.add_argument("--domain-pad-hi", type=float, default=1.2, help="Multiplier applied to high quantile.")
+    p.add_argument(
+        "--min-domain-ratio",
+        type=float,
+        default=10.0,
+        help="Ensure x_max / x_min is at least this value.",
+    )
+    p.add_argument(
+        "--sampling",
+        type=str,
+        default="logspace",
+        choices=["linspace", "logspace"],
+        help="Input sampling mode written into generated rsqrt configs.",
+    )
+    p.add_argument("--model-T", type=int, default=0, help="Override generated model.T when > 0.")
+    p.add_argument("--num-basis", type=int, default=0, help="Override generated model.num_basis when > 0.")
+    p.add_argument("--max-epochs", type=int, default=0, help="Override generated trainer.max_epochs when > 0.")
     p.add_argument("--manifest-out", type=str, default="outputs/ln_rsqrt_bank/manifest.json")
     return p.parse_args()
 
@@ -105,8 +144,15 @@ def main() -> int:
         vals = torch.cat(per_ln_vals[ln_name])
         q_lo = float(torch.quantile(vals, torch.tensor(args.min_quantile)))
         q_hi = float(torch.quantile(vals, torch.tensor(args.max_quantile)))
-        x_min = max(args.min_floor, q_lo * 0.8)
-        x_max = min(args.max_ceil, max(q_hi * 1.2, x_min * 10.0))
+        x_min, x_max = _build_domain(
+            q_lo=q_lo,
+            q_hi=q_hi,
+            min_floor=args.min_floor,
+            max_ceil=args.max_ceil,
+            pad_lo=args.domain_pad_lo,
+            pad_hi=args.domain_pad_hi,
+            min_ratio=args.min_domain_ratio,
+        )
 
         cfg_name = f"{args.config_prefix}_{_safe_name(args.hf_model)}_{_safe_name(ln_name)}"
         cfg = json.loads(json.dumps(template))  # deep copy via json
@@ -114,6 +160,13 @@ def main() -> int:
         cfg["target"]["name"] = "rsqrt"
         cfg["target"]["domain"]["x_min"] = float(x_min)
         cfg["target"]["domain"]["x_max"] = float(x_max)
+        cfg["data"]["sampling"] = args.sampling
+        if args.model_T > 0:
+            cfg["model"]["T"] = int(args.model_T)
+        if args.num_basis > 0:
+            cfg["model"]["num_basis"] = int(args.num_basis)
+        if args.max_epochs > 0:
+            cfg["trainer"]["max_epochs"] = int(args.max_epochs)
         cfg["export"]["export_model_name"] = f"{cfg_name}_export"
 
         cfg_path = training_dir / f"{cfg_name}.yaml"
@@ -125,6 +178,8 @@ def main() -> int:
                 "config_name": cfg_name,
                 "x_min": x_min,
                 "x_max": x_max,
+                "domain_ratio": x_max / x_min,
+                "sampling": args.sampling,
                 "q_lo": q_lo,
                 "q_hi": q_hi,
             }

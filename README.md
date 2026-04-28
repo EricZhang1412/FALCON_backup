@@ -93,6 +93,22 @@ uv run python -m scripts.layernorm_conversion.build_rsqrt_bank \
   --manifest-out outputs/ln_rsqrt_bank/gpt2_manifest.json
 ```
 
+For LayerNorms whose `var + eps` distribution is very narrow or close to zero, use log-space sampling, a wider fitting domain, and a larger MBE budget:
+
+```bash
+uv run python -m scripts.layernorm_conversion.build_rsqrt_bank \
+  --hf-model gpt2-medium \
+  --text-file data/eval_texts_wikitext.txt \
+  --manifest-out outputs/ln_rsqrt_bank/gpt2_medium_manifest.json \
+  --sampling logspace \
+  --min-domain-ratio 64 \
+  --domain-pad-lo 0.5 \
+  --domain-pad-hi 2.0 \
+  --model-T 32 \
+  --num-basis 16 \
+  --max-epochs 200
+```
+
 Train the generated bank:
 
 ```bash

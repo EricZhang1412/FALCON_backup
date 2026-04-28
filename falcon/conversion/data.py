@@ -34,7 +34,16 @@ def evaluate_target(name: str, inputs: np.ndarray) -> np.ndarray:
 
 def sample_inputs(config: ConversionTrainingConfig, *, num_samples: int | None = None) -> np.ndarray:
     n = num_samples or config.data.num_samples
-    return np.linspace(config.target.x_min, config.target.x_max, n, dtype=np.float32).reshape(-1, 1)
+    sampling = config.data.sampling.lower()
+    if sampling == "linspace":
+        values = np.linspace(config.target.x_min, config.target.x_max, n, dtype=np.float32)
+    elif sampling == "logspace":
+        if config.target.x_min <= 0 or config.target.x_max <= 0:
+            raise ValueError("logspace sampling requires target.domain.x_min and x_max to be positive.")
+        values = np.geomspace(config.target.x_min, config.target.x_max, n).astype(np.float32, copy=False)
+    else:
+        raise ValueError(f"Unsupported sampling mode: {config.data.sampling}")
+    return values.reshape(-1, 1)
 
 
 def build_conversion_dataloader(config: ConversionTrainingConfig) -> DataLoader:
