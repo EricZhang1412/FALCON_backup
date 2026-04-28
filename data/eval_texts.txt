@@ -1,0 +1,5 @@
+The quick brown fox jumps over the lazy dog.
+Large language models can be evaluated by perplexity and logits alignment.
+Today we compare original activations with converted MBE activations.
+在神经网络中，激活函数会影响模型的表达能力和收敛行为。
+我们希望验证转换前后模型在推理阶段的输出是否一致。

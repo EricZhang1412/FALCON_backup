@@ -1,0 +1,45 @@
+# Python cache / bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build / packaging artifacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# IDE / OS files
+.idea/
+.vscode/
+.DS_Store
+
+# Project outputs (training / eval artifacts)
+outputs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+
+# Logs and reports
+*.log
+
+# Generated plots / media
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+
+# Generated per-LN rsqrt training configs
+configs/yaml/training/rsqrt_ln_*.yaml

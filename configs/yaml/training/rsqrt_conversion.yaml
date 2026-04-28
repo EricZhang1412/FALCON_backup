@@ -1,0 +1,96 @@
+name: rsqrt_conversion
+
+target:
+  name: rsqrt
+  domain:
+    x_min: 0.5
+    x_max: 4.0
+
+data:
+  num_samples: 8192
+  eval_num_samples: 8192
+  sampling: linspace
+  batch_size: 256
+  shuffle: true
+
+model:
+  T: 16
+  num_basis: 8
+  init:
+    positive:
+      threshold:
+        alpha:
+          min: 0.05
+          max: 1.2
+        lambda:
+          min: 0.75
+          max: 0.98
+      reset:
+        alpha:
+          min: 0.05
+          max: 1.0
+        lambda:
+          min: 0.70
+          max: 0.95
+      output:
+        alpha:
+          min: 0.2
+          max: 2.0
+        lambda:
+          min: 0.75
+          max: 0.99
+    negative:
+      threshold:
+        alpha:
+          min: 2.0
+          max: 4.0
+        lambda:
+          min: 0.82
+          max: 0.98
+      reset:
+        alpha:
+          min: 0.5
+          max: 2.0
+        lambda:
+          min: 0.75
+          max: 0.95
+      output:
+        alpha:
+          min: 0.01
+          max: 0.2
+        lambda:
+          min: 0.80
+          max: 0.98
+
+optimizer:
+  name: adam
+  lr: 0.0005
+  weight_decay: 0.0
+
+scheduler:
+  name: exponential
+  gamma: 0.99
+  step_every: 10
+
+trainer:
+  max_epochs: 400
+  seed: 42
+  device: cpu
+  dtype: float32
+  log_every: 20
+
+checkpoint:
+  dir: checkpoints
+  save_best: true
+  save_latest: true
+  resume_from:
+
+artifacts:
+  root_dir: outputs/conversion
+  save_plots: true
+  save_predictions: true
+
+export:
+  export_runtime_config: true
+  export_model_name: rsqrt_conversion_export
+  export_to_yaml: true

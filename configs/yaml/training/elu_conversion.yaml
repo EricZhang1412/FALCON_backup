@@ -1,0 +1,96 @@
+name: elu_conversion
+
+target:
+  name: elu
+  domain:
+    x_min: -5.0
+    x_max: 5.0
+
+data:
+  num_samples: 4096
+  eval_num_samples: 4096
+  sampling: linspace
+  batch_size: 256
+  shuffle: true
+
+model:
+  T: 16
+  num_basis: 8
+  init:
+    positive:
+      threshold:
+        alpha:
+          min: 1.0
+          max: 2.0
+        lambda:
+          min: 0.82
+          max: 0.97
+      reset:
+        alpha:
+          min: 0.6
+          max: 1.4
+        lambda:
+          min: 0.75
+          max: 0.95
+      output:
+        alpha:
+          min: 0.3
+          max: 1.0
+        lambda:
+          min: 0.8
+          max: 0.98
+    negative:
+      threshold:
+        alpha:
+          min: 0.8
+          max: 1.5
+        lambda:
+          min: 0.82
+          max: 0.97
+      reset:
+        alpha:
+          min: 0.5
+          max: 1.2
+        lambda:
+          min: 0.75
+          max: 0.95
+      output:
+        alpha:
+          min: 0.2
+          max: 0.8
+        lambda:
+          min: 0.8
+          max: 0.98
+
+optimizer:
+  name: adam
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  name: exponential
+  gamma: 0.99
+  step_every: 10
+
+trainer:
+  max_epochs: 300
+  seed: 42
+  device: cpu
+  dtype: float32
+  log_every: 50
+
+checkpoint:
+  dir: checkpoints
+  save_best: true
+  save_latest: true
+  resume_from:
+
+artifacts:
+  root_dir: outputs/conversion
+  save_plots: true
+  save_predictions: true
+
+export:
+  export_runtime_config: true
+  export_model_name: elu_conversion_export
+  export_to_yaml: true

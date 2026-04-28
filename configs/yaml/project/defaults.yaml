@@ -1,0 +1,5 @@
+seed: 42
+runtime:
+  dtype: float64
+  device: cuda:3
+  default_T: 32

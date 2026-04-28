@@ -1,0 +1,23 @@
+[project]
+name = "Falcon"
+version = "0.1.0"
+description = "MBE neuron with Log-Timescale Initialization"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.10",
+    "numpy",
+    "PyYAML",
+    "matplotlib",
+    "transformers==4.54.1",
+    "datasets",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
