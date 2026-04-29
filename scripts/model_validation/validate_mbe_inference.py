@@ -330,7 +330,12 @@ def _load_mbe_from_checkpoint(
     device: torch.device,
 ) -> TrainableMBENeuron:
     cfg = load_conversion_training_config(conversion_cfg_name)
-    mbe = TrainableMBENeuron(T=cfg.model.T, num_basis=cfg.model.num_basis, init=cfg.model.init).to(device=device)
+    mbe = TrainableMBENeuron(
+        T=cfg.model.T,
+        num_basis=cfg.model.num_basis,
+        init=cfg.model.init,
+        fold_abs_input_for_polarities=cfg.model.fold_abs_input_for_polarities,
+    ).to(device=device)
     payload = torch.load(ckpt_path, map_location=device)
     mbe.load_state_dict(payload["model_state_dict"])
     mbe.eval()

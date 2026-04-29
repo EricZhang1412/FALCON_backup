@@ -147,7 +147,12 @@ def main() -> int:
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    model = TrainableMBENeuron(T=config.model.T, num_basis=config.model.num_basis, init=config.model.init)
+    model = TrainableMBENeuron(
+        T=config.model.T,
+        num_basis=config.model.num_basis,
+        init=config.model.init,
+        fold_abs_input_for_polarities=config.model.fold_abs_input_for_polarities,
+    )
     model = model.to(device=device, dtype=torch.float32)
 
     payload = torch.load(ckpt_path, map_location=device)
