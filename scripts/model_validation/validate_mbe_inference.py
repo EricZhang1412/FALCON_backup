@@ -56,6 +56,13 @@ def _parse_args() -> argparse.Namespace:
         required=True,
         help="comparison root, e.g. outputs/comparison/tanh_conversion",
     )
+    parser.add_argument(
+        "--eval-variants",
+        type=str,
+        default="both",
+        choices=["both", "manual", "lti"],
+        help="Which MBE variants to evaluate in addition to the original model.",
+    )
     parser.add_argument("--manual-checkpoint", type=str, default=None, help="override manual best.pt path")
     parser.add_argument("--lti-checkpoint", type=str, default=None, help="override lti best.pt path")
     parser.add_argument(
@@ -166,6 +173,26 @@ def _resolve_checkpoint_pair(
     if not lti.exists():
         raise FileNotFoundError(f"lti checkpoint not found: {lti}")
     return manual, lti
+
+
+def _resolve_variant_checkpoint(
+    root: str | Path,
+    config_name: str,
+    variant: str,
+    override: str | None,
+) -> Path:
+    root = Path(root)
+    if override:
+        ckpt = Path(override)
+    elif variant == "manual":
+        ckpt = root / "manual" / f"{config_name}_manual" / "checkpoints" / "best.pt"
+    elif variant == "lti":
+        ckpt = root / "lti" / f"{config_name}_lti" / "checkpoints" / "best.pt"
+    else:
+        raise ValueError(f"Unsupported checkpoint variant: {variant}")
+    if not ckpt.exists():
+        raise FileNotFoundError(f"{variant} checkpoint not found: {ckpt}")
+    return ckpt
 
 
 def _load_eval_texts(path: Path, max_samples: int) -> list[str]:
@@ -416,12 +443,20 @@ def main() -> int:
 
     conv_cfg = load_conversion_training_config(args.conversion_config)
     target_act = conv_cfg.target.name.lower()
-    manual_ckpt, lti_ckpt = _resolve_checkpoint_pair(
+    eval_manual = args.eval_variants in {"both", "manual"}
+    eval_lti = args.eval_variants in {"both", "lti"}
+    manual_ckpt = _resolve_variant_checkpoint(
         args.comparison_root,
         conv_cfg.name,
+        "manual",
         args.manual_checkpoint,
+    ) if eval_manual else None
+    lti_ckpt = _resolve_variant_checkpoint(
+        args.comparison_root,
+        conv_cfg.name,
+        "lti",
         args.lti_checkpoint,
-    )
+    ) if eval_lti else None
     if args.wikitext_subset:
         texts = _load_wikitext_texts(args.wikitext_subset, args.wikitext_split, args.max_samples)
         eval_source = f"wikitext/{args.wikitext_subset}:{args.wikitext_split}"
@@ -445,16 +480,20 @@ def main() -> int:
     enc = tokenizer(corpus_text, return_tensors="pt")
     input_ids = enc["input_ids"].to(device)
 
-    # Load original model once, then deep-copy for manual/lti variants.
+    # Load original model once, then deep-copy for requested MBE variants.
     base_model = AutoModelForCausalLM.from_pretrained(args.hf_model, torch_dtype=run_dtype).to(device)
     base_model.eval()
-    manual_model = copy.deepcopy(base_model)
-    lti_model = copy.deepcopy(base_model)
+    manual_model = copy.deepcopy(base_model) if eval_manual else None
+    lti_model = copy.deepcopy(base_model) if eval_lti else None
 
-    manual_mbe = _load_mbe_from_checkpoint(manual_ckpt, args.conversion_config, device)
-    lti_mbe = _load_mbe_from_checkpoint(lti_ckpt, args.conversion_config, device)
-    manual_replaced = _patch_model_activations(manual_model, target_act, MBEActivation(manual_mbe))
-    lti_replaced = _patch_model_activations(lti_model, target_act, MBEActivation(lti_mbe))
+    manual_replaced = 0
+    lti_replaced = 0
+    if eval_manual:
+        manual_mbe = _load_mbe_from_checkpoint(manual_ckpt, args.conversion_config, device)
+        manual_replaced = _patch_model_activations(manual_model, target_act, MBEActivation(manual_mbe))
+    if eval_lti:
+        lti_mbe = _load_mbe_from_checkpoint(lti_ckpt, args.conversion_config, device)
+        lti_replaced = _patch_model_activations(lti_model, target_act, MBEActivation(lti_mbe))
     manual_ln_replaced = 0
     lti_ln_replaced = 0
 
@@ -477,54 +516,63 @@ def main() -> int:
 
     if rsqrt_bank_manifest is not None:
         layernorm_mode = "per_ln_bank"
-        manual_map = _load_rsqrt_bank_modules(
-            rsqrt_bank_manifest,
-            variant="manual",
-            manual_root=Path(args.rsqrt_bank_manual_root),
-            lti_root=Path(args.rsqrt_bank_lti_root),
-            device=device,
-        )
-        lti_map = _load_rsqrt_bank_modules(
-            rsqrt_bank_manifest,
-            variant="lti",
-            manual_root=Path(args.rsqrt_bank_manual_root),
-            lti_root=Path(args.rsqrt_bank_lti_root),
-            device=device,
-        )
-        manual_ln_replaced = replace_layernorm_with_mbe_map(manual_model, rsqrt_module_map=manual_map)
-        lti_ln_replaced = replace_layernorm_with_mbe_map(lti_model, rsqrt_module_map=lti_map)
+        if eval_manual:
+            manual_map = _load_rsqrt_bank_modules(
+                rsqrt_bank_manifest,
+                variant="manual",
+                manual_root=Path(args.rsqrt_bank_manual_root),
+                lti_root=Path(args.rsqrt_bank_lti_root),
+                device=device,
+            )
+            manual_ln_replaced = replace_layernorm_with_mbe_map(manual_model, rsqrt_module_map=manual_map)
+        if eval_lti:
+            lti_map = _load_rsqrt_bank_modules(
+                rsqrt_bank_manifest,
+                variant="lti",
+                manual_root=Path(args.rsqrt_bank_manual_root),
+                lti_root=Path(args.rsqrt_bank_lti_root),
+                device=device,
+            )
+            lti_ln_replaced = replace_layernorm_with_mbe_map(lti_model, rsqrt_module_map=lti_map)
         print(f"[LayerNorm/per-LN] manual replaced={manual_ln_replaced}, lti replaced={lti_ln_replaced}")
     elif enable_layernorm_rsqrt:
         layernorm_mode = "shared_rsqrt"
         rsqrt_cfg = load_conversion_training_config(rsqrt_cfg_name)
-        rsqrt_manual_ckpt, rsqrt_lti_ckpt = _resolve_checkpoint_pair(
-            rsqrt_root,
-            rsqrt_cfg.name,
-            args.rsqrt_manual_checkpoint,
-            args.rsqrt_lti_checkpoint,
-        )
-        rsqrt_manual_mbe = _load_mbe_from_checkpoint(rsqrt_manual_ckpt, rsqrt_cfg_name, device)
-        rsqrt_lti_mbe = _load_mbe_from_checkpoint(rsqrt_lti_ckpt, rsqrt_cfg_name, device)
-
-        manual_ln_replaced = replace_layernorm_with_mbe(
-            manual_model,
-            rsqrt_module_factory=lambda: SharedMBERSqrt(rsqrt_manual_mbe.forward, min_input=1e-8),
-        )
-        lti_ln_replaced = replace_layernorm_with_mbe(
-            lti_model,
-            rsqrt_module_factory=lambda: SharedMBERSqrt(rsqrt_lti_mbe.forward, min_input=1e-8),
-        )
+        if eval_manual:
+            rsqrt_manual_ckpt = _resolve_variant_checkpoint(
+                rsqrt_root,
+                rsqrt_cfg.name,
+                "manual",
+                args.rsqrt_manual_checkpoint,
+            )
+            rsqrt_manual_mbe = _load_mbe_from_checkpoint(rsqrt_manual_ckpt, rsqrt_cfg_name, device)
+            manual_ln_replaced = replace_layernorm_with_mbe(
+                manual_model,
+                rsqrt_module_factory=lambda: SharedMBERSqrt(rsqrt_manual_mbe.forward, min_input=1e-8),
+            )
+        if eval_lti:
+            rsqrt_lti_ckpt = _resolve_variant_checkpoint(
+                rsqrt_root,
+                rsqrt_cfg.name,
+                "lti",
+                args.rsqrt_lti_checkpoint,
+            )
+            rsqrt_lti_mbe = _load_mbe_from_checkpoint(rsqrt_lti_ckpt, rsqrt_cfg_name, device)
+            lti_ln_replaced = replace_layernorm_with_mbe(
+                lti_model,
+                rsqrt_module_factory=lambda: SharedMBERSqrt(rsqrt_lti_mbe.forward, min_input=1e-8),
+            )
         print(f"[LayerNorm] manual replaced={manual_ln_replaced}, lti replaced={lti_ln_replaced}")
 
-    if manual_replaced == 0 or lti_replaced == 0:
+    if (eval_manual and manual_replaced == 0) or (eval_lti and lti_replaced == 0):
         raise RuntimeError(
             f"No activation module matched target '{target_act}'. "
             "Consider extending _patch_model_activations for this HF architecture."
         )
 
     base_acc = EvalAccumulator()
-    manual_acc = EvalAccumulator()
-    lti_acc = EvalAccumulator()
+    manual_acc = EvalAccumulator() if eval_manual else None
+    lti_acc = EvalAccumulator() if eval_lti else None
 
     with torch.no_grad():
         for batch in _iter_stride_windows(
@@ -539,17 +587,21 @@ def main() -> int:
             labels = batch["labels"]
 
             base_out = base_model(**model_inputs, labels=labels)
-            man_out = manual_model(**model_inputs, labels=labels)
-            lti_out = lti_model(**model_inputs, labels=labels)
+            man_out = manual_model(**model_inputs, labels=labels) if eval_manual else None
+            lti_out = lti_model(**model_inputs, labels=labels) if eval_lti else None
 
             base_acc.update_loss_from_labels(base_out.loss, labels)
-            manual_acc.update_loss_from_labels(man_out.loss, labels)
-            lti_acc.update_loss_from_labels(lti_out.loss, labels)
+            if eval_manual:
+                manual_acc.update_loss_from_labels(man_out.loss, labels)
+            if eval_lti:
+                lti_acc.update_loss_from_labels(lti_out.loss, labels)
 
             # Baseline alignment for original model (self vs self): expected cosine=1, top1=1.
             base_acc.update_logit_alignment(base_out.logits, base_out.logits, batch["attention_mask"])
-            manual_acc.update_logit_alignment(base_out.logits, man_out.logits, batch["attention_mask"])
-            lti_acc.update_logit_alignment(base_out.logits, lti_out.logits, batch["attention_mask"])
+            if eval_manual:
+                manual_acc.update_logit_alignment(base_out.logits, man_out.logits, batch["attention_mask"])
+            if eval_lti:
+                lti_acc.update_logit_alignment(base_out.logits, lti_out.logits, batch["attention_mask"])
 
     report = {
         "meta": {
@@ -566,8 +618,9 @@ def main() -> int:
             "stride": args.stride,
             "device": str(device),
             "dtype": args.dtype,
-            "manual_checkpoint": str(manual_ckpt),
-            "lti_checkpoint": str(lti_ckpt),
+            "eval_variants": args.eval_variants,
+            "manual_checkpoint": str(manual_ckpt) if manual_ckpt is not None else None,
+            "lti_checkpoint": str(lti_ckpt) if lti_ckpt is not None else None,
             "manual_replaced_modules": manual_replaced,
             "lti_replaced_modules": lti_replaced,
             "enable_layernorm_rsqrt": enable_layernorm_rsqrt,
@@ -578,9 +631,11 @@ def main() -> int:
             "lti_layernorm_replaced_modules": lti_ln_replaced,
         },
         "original": base_acc.summarize(),
-        "mbe_manual": manual_acc.summarize(),
-        "mbe_lti": lti_acc.summarize(),
     }
+    if eval_manual:
+        report["mbe_manual"] = manual_acc.summarize()
+    if eval_lti:
+        report["mbe_lti"] = lti_acc.summarize()
 
     print("=" * 80)
     print("HF MBE Validation Report")

@@ -160,7 +160,8 @@ uv run python -m scripts.model_validation.validate_mbe_inference \
   --comparison-root outputs/comparison/gelu_conversion \
   --rsqrt-bank-manifest outputs/ln_rsqrt_bank/gpt2_manifest.json \
   --text-file data/eval_texts_wikitext.txt \
-  --max-samples 64
+  --max-samples 64 \
+  --eval-variants lti
 ```
 
 Sample evaluation text from WikiText:

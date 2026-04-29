@@ -44,6 +44,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--dtype", type=str, default="float32", choices=["float32", "bfloat16", "float16"])
+    p.add_argument(
+        "--eval-variants",
+        type=str,
+        default="both",
+        choices=["both", "manual", "lti"],
+        help="Which MBE variants to validate.",
+    )
 
     p.add_argument(
         "--comparison-root",
@@ -152,6 +159,8 @@ def main() -> int:
             args.device,
             "--dtype",
             args.dtype,
+            "--eval-variants",
+            args.eval_variants,
             "--save-json",
             args.save_json,
         ]
